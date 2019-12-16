@@ -1,68 +1,1406 @@
 <?php
-
 defined('BASEPATH') OR exit('No direct script access allowed');
-
-class User extends CI_Controller
-{
-	public function __construct()
-	{
-		parent::__construct();
-		//$headers = apache_request_headers();
-	   $this->load->model('api/Common_Model');
-	   $this->load->model('api/User_model');
-	    $this->load->model('admin/Common_model');
-		 $this->load->model('admin/Admin_model');
-	   $this->load->helper('date');
-	   date_default_timezone_set("Asia/Calcutta");
-	   if(!$this->session->userdata('admin_details'))
-		{
-			redirect(site_url('admin'));
-			exit;
-		}
-
-	}
-
-	public function index(){
-		$data['datas'] = $this->db->get('userDetails')->result_array();
-		$admin_details = $this->session->userdata('admin_details');
-		$data['active'] = 'userDetails';
-		if($this->session->userdata('language') == 'en'){
-			$data['title']  = 'Manage Users';
-		}
-		else{
-			$data['title'] = "détail de l'utilisateur";
-		}
-		$data['admin'] = $this->Common_model->get_data_by_id('admin','id',$admin_details['admin_id']);
-		$this->load->view('admin/includes/header',$data);
-		$this->load->view('admin/userDetails/manageUserDetails');
-		$this->load->view('admin/includes/footer');
-		
+class User extends CI_Controller {
+	/**
+	 * Index Page for this controller.
+	 *
+	 * Maps to the following URL
+	 * 		http://example.com/index.php/welcome
+	 *	- or -
+	 * 		http://example.com/index.php/welcome/index
+	 *	- or -
+	 * Since this controller is set as the default controller in
+	 * config/routes.php, it's displayed at http://example.com/
+	 *
+	 * So any other public methods not prefixed with an underscore will
+	 * map to /index.php/welcome/<method_name>
+	 * @see https://codeigniter.com/user_guide/general/urls.html
+	 */
+	public function __construct(){
+		 parent::__construct();
+		 error_reporting(E_ALL);
+		 $this->load->model('api/Common_Model');
+		 $this->load->model('api/User_model');
+		 
 	}
 	
+	public function genrateToken(){
+		//require_once 'lib/autoload.php';
+		require_once dirname(dirname(dirname(__FILE__))).'/libraries/lib/autoload.php';
+		Braintree_Configuration::environment('sandbox');
+		Braintree_Configuration::merchantId('wgkgwm8y6bnb7qvv');
+		Braintree_Configuration::publicKey('py3ng8n55bmbzmvr');
+		Braintree_Configuration::privateKey('a7dfcdba9251446c317af081ce90f8cd');
+		$details =  ($clientToken = Braintree_ClientToken::generate());
+		$message['success'] = '1';
+		$message['message'] = 'details found successfully';
+		$message['details'] = $details;
+		echo json_encode($message);
+	}
 	
-	public function ResetPassword(){
+	public function paypalCheckOut(){	
+		require_once dirname(dirname(dirname(__FILE__))).'/libraries/lib/Braintree.php';
+		Braintree_Configuration::environment('sandbox');
+		Braintree_Configuration::merchantId('wgkgwm8y6bnb7qvv');
+		Braintree_Configuration::publicKey('py3ng8n55bmbzmvr');
+		Braintree_Configuration::privateKey('a7dfcdba9251446c317af081ce90f8cd');
+		$result = Braintree_Transaction::sale([
+		  'amount' => $this->input->post('amount'),
+		  'paymentMethodNonce' => $this->input->post('nonce'),
+		  'options' => [
+			'submitForSettlement' => True
+		  ]
+		]);
+
+		if($result->success === true){
+			$message['success'] = '1';
+			$message['message'] = 'api hit successfully';
+		}else{
+			$message['success'] = '0';
+			$message['message'] = 'some errpr';
+		}
+		echo json_encode($message);
+	}
+	
+	public function userRegister(){
 		if($this->input->post()){
-			$this->form_validation->set_rules('new_password', 'New password', 'required|min_length[6]');
-			$this->form_validation->set_rules('confirm_password', 'Confirm Password', 'required|matches[new_password]');
-			if ($this->form_validation->run() == FALSE){
-				$this->load->view('template/resetPassword');
+			$check_email= $this->Common_Model->check_user('userDetails','email',$this->input->post('email'));
+			$check_phone= $this->Common_Model->check_user('userDetails','phone',$this->input->post('phone'));
+			if(!empty($check_email)){
+				$message = array('success' =>'0','message'=>'This Email Already Exist!');
+			}
+			elseif(!empty($check_phone)){
+				$message = array('success' =>'0','message'=>'This Phone Already Exist!');
 			}
 			else{
-				$datas['password'] = md5($this->input->post('new_password'));
-				$update = $this->Common_Model->update('userDetails',$datas,'id',$this->input->post('id'));
-				if($update){
-					$this->session->set_flashdata('success', 'Password Updated Successfully');
-					redirect(site_url().'admin/user/ResetPassword/'.$this->input->post('id'));
+				$details['name'] = $this->input->post('name');
+				$details['email'] = $this->input->post('email');
+				$details['phone'] = $this->input->post('phone');
+				$details['password'] =  md5($this->input->post('password'));
+				$details['otp'] = mt_rand(1000,9999); 
+				$details['device_type'] =  $this->input->post('device_type');
+				$details['reg_id'] =  $this->input->post('reg_id');
+				$details['created'] = date('y-m-d h:i:s');
+				/*if(!empty($_FILES["vehicleImage"]["name"])){
+					$name= time().'_'.$_FILES["vehicleImage"]["name"];
+					$liciense_tmp_name=$_FILES["vehicleImage"]["tmp_name"];
+					$error=$_FILES["vehicleImage"]["error"];
+					$liciense_path='uploads/user/'.$name;
+					move_uploaded_file($liciense_tmp_name,$liciense_path);
+					$details['vehicleImage']=base_url(). $liciense_path;
 				}
-				else{
-					$this->session->set_flashdata('error', 'Some error occurred');
-					redirect(site_url().'admin/user/ResetPassword/'.$this->input->post('id'));
+				if(!empty($_FILES["idProofImage"]["name"])){
+					$name= time().'_'.$_FILES["idProofImage"]["name"];
+					$liciense_tmp_name=$_FILES["idProofImage"]["tmp_name"];
+					$error=$_FILES["idProofImage"]["error"];
+					$liciense_path='uploads/user/'.$name;
+					move_uploaded_file($liciense_tmp_name,$liciense_path);
+					$details['idProofImage']=base_url(). $liciense_path;
+				}*/
+				$data = $this->Common_Model->register('userDetails',$details);
+				if($data){
+					$insert_id = $this->db->insert_id();
+					$details['id'] = "$insert_id";
+					$message = array('success' =>'1','message'=>'otp send your phone','details'=>$details);
 				}
 			}
 		}
 		else{
-			$this->load->view('template/resetPassword');
+			$message = array(
+            'message' => 'please enter parameters', // Automatically generated by the model 
+            );
+		}
+		echo json_encode($message);
+	}
+	
+	
+	public function userLogin(){ 
+		if($this->input->post())
+        {
+			$email = $this->input->post('email');
+			$data = $this->User_model->userLogin('userDetails',$email,md5($this->input->post('password')));
+			if(!empty($data))
+	        {
+				if($data['onlineStatus'] == '0'){
+					$message = array(
+						'success'=>'2',
+						'message' => 'Please Verify Your Email',
+						'details' => $data
+					);
+				}
+				else{
+					$datas = array('reg_id' => $this->input->post('reg_id'),'device_type' => $this->input->post('device_type'));
+					$update = $this->Common_Model->update('userDetails',$datas,'id',$data['id']);
+					$datas1=$this->Common_Model->get_data_by_id('userDetails','id',$data['id']);
+					$message = array(
+						'success'=>'1',
+						'message' => 'user login successfully',
+						'details' => $datas1
+					);
+				}
+	        }
+			else
+	        {
+	            $message = array(
+		            'success'=>'0',
+		            'message' => 'Please enter valid login credentials!',
+		        );
+	        }
+        }
+        else
+        {
+       		$message = array(
+            'message' => 'please enter parameters', // Automatically generated by the model 
+            );
+        }
+        echo json_encode($message); 
+	}
+	
+	public function matchVerificationToken(){
+		if($this->input->post())
+        {
+	        $id = $this->input->post('id');
+	        $token = $this->input->post('token');
+	        $data = $this->User_model->match_verifaction_token($id,$token,'userDetails');
+			if(!empty($data))
+	        {   
+				$datas = array('onlineStatus' => '1');
+                $update = $this->Common_Model->update('userDetails',$datas,'id',$id);
+				$message = array(	           
+		            'success'=>'1',
+		            'message' => 'verification token match successfully',
+		        );
+				echo json_encode($message);
+	        }
+	        else
+	        {
+	       	     $message = array(
+		            'message'=>"sorry your verification token does not match!",
+		            'success'=>'0'
+		         );
+				 echo json_encode($message);
+	        }
+        }
+        else
+        {
+       		$message = array(
+				'message' => 'please enter parameters', 
+            );
+			echo json_encode($message);
+        }
+				
+    }
+	
+	public function resendVerificationToken()
+    { 
+   		if($this->input->post())
+        {
+	        $id = $this->input->post('id');
+	        $otp = mt_rand(1000,9999);    
+			$user=$this->Common_Model->get_data_by_id('userDetails','id',$id);
+             
+            if(!empty($user))
+	        { 
+	         	$datas = array('otp' => $otp);
+                $update = $this->Common_Model->update('userDetails',$datas,'id',$id);
+		        $message = array(
+		                 
+		            'success'=>'1',
+		            'message' => 'otp send to your phone',
+					'details' => $datas
+		        );
+		        echo json_encode($message); 
+	        }
+	        else
+	        {
+	       	     $message = array(
+		            'message'=>"error",
+		            'success'=>'0'
+		         );
+		        echo json_encode($message);
+	        }
+        }
+        else
+        {
+       		$message = array(
+				'message' => 'please enter parameters', 
+            );
+            echo json_encode($message);
+        }     
+    }
+	
+	public function forgotPassword(){
+    	if($this->input->post()){
+	    	$email=$this->input->post('email');
+	        $check_email = $this->Common_Model->check_email($email);
+			if(empty($check_email)){
+				$message = array(
+					'message' => 'This email user not register!',
+					'success'=>'0' 
+				);
+	        }
+	        else{
+	         	$length = 8;
+	         	$characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+				$charactersLength = strlen($characters);
+				$password = '';
+				for ($i = 0; $i < $length; $i++) {
+			       $password .= $characters[rand(0, $charactersLength - 1)];
+				}
+		        $data = array(
+		            'password' => md5($password)
+		        );
+		        $update = $this->Common_Model->update('userDetails',$data,'email',$email);
+		        if($update){
+		         	$this->load->library('email');
+					$config['mailtype'] = 'html';
+					$this->email->initialize($config);
+					$this->email->from('bagicha.infosif@gmail.com');
+					$this->email->to($check_email['email']);
+					$this->email->subject("Freshup - Regarding Forget password.");
+					$message = "Hi ".$check_email['name']." your new password here ".$password;		
+					$this->email->message($message);
+					$send = $this->email->send();
+		         	$message = array(
+				            'message'=>'Your password send to your email',
+				            'success'=>'1'
+				         );
+		        }
+		        else{
+		         	$message = array(
+						'message' => 'some error occured', 
+					);
+		        }
+	        } 
+         }
+         else
+         {
+         	$message = array(
+				'message' => 'please enter parameters', 
+            );
+         }
+		 echo json_encode($message);
+    }
+	
+	public function checkSocialId(){
+		$check_social_id = $this->Common_Model->get_data_by_id('userDetails','social_id',$this->input->post('social_id'));
+		if(!empty($check_social_id)){
+			$message = array('success' =>'1','message'=>'user login successfully','details'=>$check_social_id);
+		}
+		else{
+			$message = array('success' =>'0','message'=>'please register user');
+		}
+		echo json_encode($message);
+	}
+	
+	public function UserSocialLogin(){
+		if($this->input->post()){
+			$check_social_id = $this->Common_Model->get_data_by_id('userDetails','social_id',$this->input->post('social_id'));
+			$check_email = $this->Common_Model->check_user('userDetails','email',$this->input->post('email'));
+			$check_phone = $this->Common_Model->check_user('userDetails','phone',$this->input->post('phone'));
+			if(!empty($check_social_id)){
+				$message = array('success' =>'1','message'=>'user login successfully','details'=>$check_social_id);
+			}
+			elseif(!empty($check_email)){
+				$message = array('success' =>'1','message'=>'user login successfully','details'=>$check_email);
+			}
+			elseif(!empty($check_phone)){
+				$message = array('success' =>'0','message'=>'This Phone number is already exit');
+			}
+			else{
+				$data['name'] = $this->input->post('name');
+				$data['email'] = $this->input->post('email');
+				$data['image'] = $this->input->post('image');
+				
+				$data['phone'] = $this->input->post('phone');
+				$data['otp'] = mt_rand(1000,9999); ;
+				$data['social_id'] =$this->input->post('social_id');
+				$data['device_type'] =$this->input->post('device_type');
+				$data['reg_id'] =$this->input->post('reg_id');
+				$data['login_type'] =$this->input->post('login_type');
+				$data['created'] = date('y-m-d h:i:s');
+				
+				$insert = $this->Common_Model->insert_data($data,'userDetails');
+				$insert_id = $this->db->insert_id();
+				$data['id'] = "$insert_id";
+				$message = array('success' =>'1','message'=>'user register successfully','details'=>$data);
+			}
+		}
+		else{
+		$message = array(
+				   'message' => 'please enter parameters', // Automatically generated by the model 
+				   );
+		}
+		echo json_encode($message);
+	} 
+	
+	
+	
+	
+	public function changePassword(){
+		if($this->input->post()){
+			$id = $this->input->post('userId');
+			$old_password=md5($this->input->post('old_password'));
+			$new_password=md5($this->input->post('new_password'));
+			$check_password=$this->Common_Model->check_password($old_password,$id);
+			if(empty($check_password)){
+				$message = array(
+						'success'=>"0",
+						'message' => "Old Password Does't Match"
+				);
+				echo json_encode($message);
+			}
+			else{
+				$update_password=$this->Common_Model->change_password($new_password,$id);
+				if ($update_password) {
+					$message = array(
+						'success'=>"1",
+						'message' => "Password Change Successfully"
+					);
+					echo json_encode($message); 
+				}else {
+					$message = array(
+						'success'=>"1",
+						'message' => "Password Can't Change"
+					);
+					echo json_encode($message);
+				}
+			}
 		}
 	}
+	
+	
+	
+	
+	
+	public function userGetProfile(){
+		if($this->input->post()){
+	    	$id=$this->input->post('userId');
+	    	$data=$this->Common_Model->get_data_by_id('userDetails','id',$id);
+			if(!empty($data)){
+	    		$message['success'] = "1";
+				$message['message'] = "details found successfully";
+				$message['details'] = $data;
+	    		echo json_encode($message);
+	    	}
+	    	else{
+	    		$message = [
+			            'message'=>"No details found",
+			            'success'=>'0'
+			         ];
+			         echo json_encode($message);
+	    	}
+        }
+    	else{
+         	$message = [
+            'message' => 'please enter parameters', // Automatically generated by the model
+            ];
+            echo json_encode($message);
+        }
+	}
+	
+	public function userUpdateProfile(){
+		if($this->input->post()){
+			$details['name'] = $this->input->post('name');
+			if(!empty($this->input->post('phone'))){
+				$details['phone'] =  $this->input->post('phone');
+				$details['otp'] = mt_rand(1000,9999); 
+			} 
+			$details['updated'] = date('y-m-d h:i:s');
+			if(!empty($_FILES["image"]["name"])){
+				$name= time().'_'.$_FILES["image"]["name"];
+				$liciense_tmp_name=$_FILES["image"]["tmp_name"];
+				$error=$_FILES["image"]["error"];
+				$liciense_path='uploads/user/'.$name;
+				move_uploaded_file($liciense_tmp_name,$liciense_path);
+				$details['image']=base_url(). $liciense_path;
+			}
+			$update = $this->Common_Model->update('userDetails',$details,'id',$this->input->post('userId'));
+			if(!empty($update)){
+				$data=$this->Common_Model->get_data_by_id('userDetails','id',$this->input->post('userId'));
+				if(!empty($this->input->post('phone'))){
+					$status = '1';
+				} 
+				else{
+					$status = '2';
+				}
+				$message = [  
+					'success' => $status,
+					'message' => 'information updated successfully',
+					'details' => $data
+				];	
+			}
+			else{
+				$message = [
+					'success' => '0',
+					'message' => 'some error are occurred'
+				];
+			}
+		}
+		else{
+			$message = [
+				'message' => 'please enter parameters',
+            ];
+		}
+		echo json_encode($message);
+	}
+	
+	public function getProduct(){
+		$data = $this->db->get_where('productCategory')->result_array();
+		if(!empty($data)){
+			$message['success'] = "1";
+			$message['message'] = "details found successfully";
+			$message['details'] = $data;
+		}
+		else{
+			$message = [
+				'message'=>"No details found",
+				'success'=>'0'
+			];	 
+	    }
+		echo json_encode($message);
+	}
+	
+	public function getServices(){
+		$data = $this->db->get_where('services')->result_array();
+		if(!empty($data)){
+			$message['success'] = "1";
+			$message['message'] = "details found successfully";
+			$message['details'] = $data;
+		}
+		else{
+			$message = [
+				'message'=>"No details found",
+				'success'=>'0'
+			];	 
+	    }
+		echo json_encode($message);
+	}
+	
+	
+	public function getSubCategoryAndProduct(){
+		$data = $this->db->get_where('productSubCategory',array('categoryId'=>$this->input->post('categoryId')))->result_array();
+		if(!empty($data)){
+			$message['success'] = "1";
+			$message['message'] = "details found successfully";
+			foreach($data as $datas){
+				$subSubServices = $this->db->get_where('product',array('subCategoryId'=>$datas['id']))->result_array();
+				if(!empty($subSubServices)){
+					foreach($subSubServices as $product){
+						$testing = $this->db->get_where('addToCart',array('productId' => $product['id'],'paymentStatus' => '0','userId' => $this->input->post('userId')))->row_array();
+						if(!empty($testing)){
+							$product['addToCartStatus'] = '1';
+						}
+						else{
+							$product['addToCartStatus'] = '0';
+						}
+						$datas['product'][] = $product;
+					}
+				}
+				else{
+					$datas['product'] = [];
+				}
+				$message['details'][] = $datas;
+			}
+		}
+		else{
+			$message = [
+				'message'=>"No details found",
+				'success'=>'0'
+			];	 
+	    }
+		echo json_encode($message);
+	}
+	
+	
+	public function getSubServices(){
+		$data = $this->db->get_where('subServices',array('serviceId'=>$this->input->post('serviceId')))->result_array();
+		if(!empty($data)){
+			$message['success'] = "1";
+			$message['message'] = "details found successfully";
+			foreach($data as $datas){
+				$subSubServices = $this->db->get_where('subSubServices',array('subServiceId'=>$datas['id']))->result_array();
+				if(!empty($subSubServices)){
+					$datas['subSubServices'] = $subSubServices;
+				}
+				else{
+					$datas['subSubServices'] = [];
+				}
+				$message['details'][] = $datas;
+			}
+		}
+		else{
+			$message = [
+				'message'=>"No details found",
+				'success'=>'0'
+			];	 
+	    }
+		echo json_encode($message);
+	}
+	
+	public function getSubSubServices(){
+		$data = $this->db->get_where('subSubServices',array('subServiceId'=>$this->input->post('subServiceId')))->result_array();
+		if(!empty($data)){
+			$message['success'] = "1";
+			$message['message'] = "details found successfully";
+			$message['details'] = $data;
+		}
+		else{
+			$message = [
+				'message'=>"No details found",
+				'success'=>'0'
+			];	 
+	    }
+		echo json_encode($message);
+	}
+	
+	public function getBarberDetails(){
+		$apintDate = $this->input->post('apointmentDate');
+		$unixTimestamp = strtotime($apintDate);
+		$dayOfWeek = date("l", $unixTimestamp);
+		$checkDays = $this->db->get_where('slot_time')->row_array();
+		$dd = date_create($checkDays['holiday_startDate']);
+		$holiday_startDate =  date_format($dd,"Y-m-d");
+		$dd = date_create($checkDays['holiday_endDate']);
+		$holiday_endDate =  date_format($dd,"Y-m-d");
+		$offDay = explode(',',$checkDays['non_working_days']);
+		$countDay = count($offDay);
+		if(!empty($offDay[0]) && $offDay[0] == $dayOfWeek){
+			$message['success'] = '2';
+			$message['message'] = 'Today is Holiday';
+		}
+		elseif(!empty($offDay[1]) && $offDay[1] == $dayOfWeek){
+			$message['success'] = '2';
+			$message['message'] = 'Today is Holiday';
+		}
+		else{
+			//$data = $this->db->get_where('barber')->result_array();
+			if(!empty($checkDays['holiday_startDate'])){
+				if($this->input->post('apointmentDate') >= $holiday_startDate && $this->input->post('apointmentDate') <= $holiday_endDate ){
+					$message['success'] = '2';
+					$message['message'] = 'Today is Holiday';
+				}
+				else{
+					$joinQueDetails = $this->db->get_where('joinQueBarber')->result_array();
+					if(!empty($joinQueDetails)){
+						foreach($joinQueDetails as $joinQue){
+							$ids[] = $joinQue['barberId'];
+						}
+						$barberIDs = implode(',',$ids);
+					}
+					else{
+						$barberIDs = '';
+					}
+					$data = $this->Common_Model->getBarberDetails($barberIDs);
+					$details=$this->Common_Model->get_data_by_id('slot_time','id','1');
+					if(!empty($data)){
+						foreach($data as $datas){ 
+							if(!(($this->input->post('apointmentDate') >= $datas['startDate'] ) && ($this->input->post('apointmentDate') <= $datas['endDate'])) || (($datas['startDate'] == '') && ($datas['endDate'] == ''))){
+								$detail = $this->Common_Model->getDateTimeSlot($this->input->post('apointmentDate'), $datas['id']);
+								$datas['bookingTime'] = $detail;
+								$getDetails['barberDeatils'][]= $datas;
+							}
+						}	
+					}
+					if($details){
+						if($dayOfWeek == 'Tuesday' || $dayOfWeek == 'Wednesday' || $dayOfWeek == 'Thursday' ||  $dayOfWeek == 'Friday'){
+							$details['firstShiftStartTime'] = $details['regularFirstShiftStartTime'];
+							$details['firstShiftEndTime'] = $details['regularFirstShiftEndTime'];
+							$details['secondShifStartTime'] = $details['regularSecondShiftStartTime'];
+							$details['secondShifEndTime'] = $details['regularSecondShiftEndTime'];
+						}
+						else{
+							$details['firstShiftStartTime'] = $details['weekendFirstShiftStartTime'];
+							$details['firstShiftEndTime'] = $details['weekendFirstShiftEndTime'];
+							$details['secondShifStartTime'] = $details['weekendSecondShiftStartTime'];
+							$details['secondShifEndTime'] = $details['weekendSecondShiftEndTime'];
+						}
+						
+						$getDetails['timeSlotDetails']= $details;
+					}
+					
+					if(!empty($getDetails['barberDeatils']) || !empty($getDetails['timeSlotDetails'])){
+						$message['success'] = "1";
+						$message['message'] = "Details Found Successfully";
+						$message['details'] = $getDetails;
+					}
+					else{
+						$message['success'] = '0'; 
+						$message['message'] = 'no details found'; 
+					}
+				}
+			}
+			else{
+				$joinQueDetails = $this->db->get_where('joinQueBarber')->result_array();
+				if(!empty($joinQueDetails)){
+					foreach($joinQueDetails as $joinQue){
+						$ids[] = $joinQue['barberId'];
+					}
+					$barberIDs = implode(',',$ids);
+				}
+				else{
+					$barberIDs = '';
+				}
+				$data = $this->Common_Model->getBarberDetails($barberIDs);
+				$details=$this->Common_Model->get_data_by_id('slot_time','id','1');
+				if(!empty($data)){
+					foreach($data as $datas){ 
+						if(!(($this->input->post('apointmentDate') >= $datas['startDate'] ) && ($this->input->post('apointmentDate') <= $datas['endDate'])) || (($datas['startDate'] == '') && ($datas['endDate'] == ''))){
+							$detail = $this->Common_Model->getDateTimeSlot($this->input->post('apointmentDate'), $datas['id']);
+							$datas['bookingTime'] = $detail;
+							$getDetails['barberDeatils'][]= $datas;
+						}
+					}	
+				}
+				if($details){
+					if($dayOfWeek == 'Tuesday' || $dayOfWeek == 'Wednesday' || $dayOfWeek == 'Thursday' ||  $dayOfWeek == 'Friday'){
+						$details['firstShiftStartTime'] = $details['regularFirstShiftStartTime'];
+						$details['firstShiftEndTime'] = $details['regularFirstShiftEndTime'];
+						$details['secondShifStartTime'] = $details['regularSecondShiftStartTime'];
+						$details['secondShifEndTime'] = $details['regularSecondShiftEndTime'];
+					}
+					else{
+						$details['firstShiftStartTime'] = $details['weekendFirstShiftStartTime'];
+						$details['firstShiftEndTime'] = $details['weekendFirstShiftEndTime'];
+						$details['secondShifStartTime'] = $details['weekendSecondShiftStartTime'];
+						$details['secondShifEndTime'] = $details['weekendSecondShiftEndTime'];
+					}
+					
+					$getDetails['timeSlotDetails']= $details;
+				}
+				
+				if(!empty($getDetails['barberDeatils']) || !empty($getDetails['timeSlotDetails'])){
+					$message['success'] = "1";
+					$message['message'] = "Details Found Successfully";
+					$message['details'] = $getDetails;
+				}
+				else{
+					$message['success'] = '0'; 
+					$message['message'] = 'no details found'; 
+				}
+			}
+		}
+		echo json_encode($message);
+	}
+	
+	public function userBookingServices(){
+		$details['user_id'] =$this->input->post('user_id');
+		$details['subSubService_id'] =$this->input->post('subSubService_id');
+		$details['barber_id'] = $this->input->post('barber_id');
+		$details['apointmentDate'] = $this->input->post('apointmentDate');
+		$details['timeslot'] = $this->input->post('timeslot');
+		$insert = $this->db->insert('userBookingServices',$details);
+		if($insert){
+			$message = array('success'=>'1','message'=>'Data Insert succssfully');
+		}
+		else{
+			$message['success'] = '0'; 
+			$message['message'] = 'no details found'; 
+		}
+		echo json_encode($message);
+	}
+	
+	public function getUserBookingSercices(){
+		$data = $this->Common_Model->getUserBookingServices($this->input->post('userId')); 
+		if(!empty($data)){
+			$message['success'] = '1'; 
+			$message['message'] = 'details found successfully'; 
+			foreach($data as $datas){
+				date_default_timezone_set('Asia/Kolkata');
+				$currentTime =  $this->input->post('currentTime');
+				$todayDate = date("Y-m-d");
+				if($datas['apointmentDate'] >= $todayDate && $datas['userStatus'] == '0' && $datas['status'] == '1'){
+					if($datas['apointmentDate'] == $todayDate){
+						if($datas['timeslot'] >= $currentTime){
+							$datas['upcomingPastApointment'] = 1;
+						}
+						else{
+							$datas['upcomingPastApointment'] = 0;
+						}
+					}
+					else{
+						$datas['upcomingPastApointment'] = 1;
+					}
+				}
+				else{
+					$datas['upcomingPastApointment'] = 0;
+				}
+				if($datas['paymentStatus'] == '1'){
+					$datas['paymentMethod'] = 'Stripe';
+				}
+				elseif($datas['paymentStatus'] == '2'){
+					$datas['paymentMethod'] = 'Cash';
+				}
+				elseif($datas['paymentStatus'] == '3'){
+					$datas['paymentMethod'] = 'Paypal';
+				}
+				else{
+					$datas['paymentMethod'] = '';
+				}
+				if(!empty($datas['subSubService_id'])){
+					$subSubServiceDetails = $this->Common_Model->getSubCategoryDetails($datas['subSubService_id']);
+					foreach($subSubServiceDetails as $subSubServiceDetail){
+						$datas['subSubService_title'][] = $subSubServiceDetail;
+					}
+				}
+				else{
+					$datas['subSubService_title'] = [];
+				}
+				$message['details'][] = $datas;
+			}
+		}
+		else{
+			$message['success'] = '0'; 
+			$message['message'] = 'no details found'; 
+		}
+		echo json_encode($message);
+	}
+	
+	public function userCancelBookingService(){
+		$data['userStatus'] = '1';
+		$update = $this->Common_Model->update('userBookingServices',$data,'id',$this->input->post('bookingServiceId'));
+		if($update){
+			$message['success'] = '1';
+			$message['message'] = 'status update successfully';
+		}
+		else{
+			$message['success'] = '0';
+			$message['message'] = 'some error';
+		}
+		echo json_encode($message);
+	}
+
+	public function addToCart(){
+		if($this->input->post()){
+			$getCartDetails = $this->db->get_where('addToCart',array('paymentStatus' => '0','userId'=>$this->input->post('userId'),'productId' => $this->input->post('productId')))->row_array();
+			if(empty($getCartDetails)){
+				$details['userId'] = $this->input->post('userId');
+				$details['productId'] = $this->input->post('productId');
+				$details['quantity'] = $this->input->post('quantity');
+				$details['created'] = date('y-m-d h:i:s'); 
+				$data = $this->Common_Model->register('addToCart',$details);
+				if($data){
+					$details1 =  $this->Common_Model->getFromCart($this->input->post('userId'));
+					if(!empty($details1)){
+						$message['success'] = '1';
+						$message['message']  = 'Detials found successfully';
+						$totalPriceSum ='';
+						foreach($details1 as $deta){
+							$deta['cartPrice'] = $deta['price'] * $deta['quantity'];
+							$message['details'][] = $deta;
+							$totalPriceSum += $deta['cartPrice'];
+						}
+						$message['totalPrice'] = (string)$totalPriceSum ;
+					}else{
+						$message['success'] = '0';
+						$message['message'] = 'No details found .';
+					}
+				}
+			}
+			else{
+				if($this->input->post('quantity') == 0){
+					$detleCart = $this->db->delete('addToCart', array('id' => $getCartDetails['id'])); 
+					if($detleCart){
+						$details1 =  $this->Common_Model->getFromCart($this->input->post('userId'));
+						if(!empty($details1)){
+							$message['success'] = '1';
+							$message['message']  = 'Detials found successfully';
+							$totalPriceSum ='';
+							foreach($details1 as $deta){
+								$deta['cartPrice'] = $deta['price'] * $deta['quantity'];
+								$message['details'][] = $deta;
+								$totalPriceSum += $deta['cartPrice'];
+							}
+							$message['totalPrice'] = (string)$totalPriceSum ;
+						}else{
+							$message['success'] = '0';
+							$message['message'] = 'No details found .';
+						}
+					}
+				}
+				else{
+					$datas['quantity'] = $this->input->post('quantity');
+					$update = $this->Common_Model->update('addToCart',$datas,'id',$getCartDetails['id']);
+					if($update){
+						$details1 =  $this->Common_Model->getFromCart($this->input->post('userId'));
+						if(!empty($details1)){
+							$message['success'] = '1';
+							$message['message']  = 'Detials found successfully';
+							$totalPriceSum ='';
+							foreach($details1 as $deta){
+								$deta['cartPrice'] = $deta['price'] * $deta['quantity'];
+								$message['details'][] = $deta;
+								$totalPriceSum += $deta['cartPrice'];
+							}
+							$message['totalPrice'] = (string)$totalPriceSum ;
+							
+						}else{
+							$message['success'] = '0';
+							$message['message'] = 'No details found .';
+						}
+					}
+				}
+			}
+		}
+		else{
+			$message = array(
+            'message' => 'please enter parameters', // Automatically generated by the model 
+            );
+		}
+		echo json_encode($message);
+	}
+	
+	public function getDataFromCart(){
+		$details =  $this->Common_Model->getFromCart($this->input->post('userId'));
+		if(!empty($details)){
+			$message['success'] = '1';
+			$message['message']  = 'Detials found successfully';
+			$totalPriceSum =''; 
+			foreach($details as $deta){
+				$deta['cartPrice'] = $deta['price'] * $deta['quantity'];
+				$message['details'][] = $deta;
+				$totalPriceSum += $deta['cartPrice'];
+			}
+			$message['totalPrice'] = (string)$totalPriceSum ;
+		}else{
+			$message['success'] = '0';
+			$message['message'] = 'No details found .';
+		}
+		echo json_encode($message);
+	}
+		
+	public function deleteDataFromCart(){
+		$data = $this->Common_Model->deleteCartData($this->input->post('id'));
+		if(!empty($data)){
+			$message['success'] = '1';
+			$message['message']  = 'Product Delete successfully';
+		}
+		else{
+			$message['success'] = '0';
+			$message['message']  = 'Something wrong';
+		}
+		echo json_encode($message);
+	}
+	
+	
+	public function userPaymentAcceptance(){
+		if($this->input->post()){
+			if($this->input->post('paymentMethod') == 'cash'){
+				$details['paymentMethod'] = 'cash'; 
+				$details['userId'] = $this->input->post('userId'); 
+				$details['addToCartId'] = $this->input->post('addToCartId'); 
+				$details['country'] = $this->input->post('country'); 
+				$details['state'] = $this->input->post('state'); 
+				$details['city'] = $this->input->post('city'); 
+				$details['address'] = $this->input->post('address'); 
+				$details['zipCode'] = $this->input->post('zipCode'); 
+				$details['amount'] = $this->input->post('amount');
+				$details['orderId'] = $this->input->post('orderId');
+				$details['created'] = date('Y-m-d H:i:s');
+				$data = $this->Common_Model->register('productSaleOrder',$details);
+				if($data){
+					$notification['orderId'] = $this->input->post('orderId');
+					$notification['saleOrderId'] = $this->db->insert_id();
+					$notification['userId'] = $this->input->post('userId');
+					$notification['created'] = date('Y-m-d H:i:s');
+					$this->Common_Model->register('productOrderNotification',$notification);
+					$addToCartUpdate['paymentStatus'] = '1';
+					$addToCartUpdate['productSaleStatus'] = '1';
+					$update = $this->Common_Model->update('addToCart',$addToCartUpdate,'userId', $this->input->post('userId'));
+					$message['success'] = '1';
+					$message['paymentMethod'] = 'cash';
+					$message['message'] = 'order bokking successfully';
+				}
+			}
+			elseif($this->input->post('paymentMethod') == 'stripe'){
+				$userId = $this->input->post('userId');
+				$price = ($this->input->post('amount')*100); // converted into pence
+				$get_price = $price;
+				require_once dirname(dirname(dirname(__FILE__))).'/libraries/stripe/init.php';
+				\stripe\Stripe::setApiKey("sk_test_0EYrvOd0DV1zUH1VFknGBYdd"); //Replace with your Secret Key
+				try{
+				$payment_success="success";
+				$token = $this->input->post('token');
+				$customer = \stripe\Customer::create(array(
+					"source" => $token,
+					"description" => $userId)
+				); 
+				$charge=\stripe\Charge::create(array(
+					"amount" => $get_price, // amount in pence, again
+					"currency" => "USD",
+					"customer" => $customer->id)
+				);
+
+				} catch (\stripe\Error\ApiConnection $e) {
+				$payment_success = $e->getMessage();
+				} catch (\stripe\Error\InvalidRequest $e) {
+				echo "Network problem, perhaps try again";
+				} catch (\stripe\Error\Api $e) {
+				echo "there is an error in your card validity try in few minutes";
+				} catch (\stripe\Error\Card $e) {
+				echo "servers are down kindly try again in few minutes";
+				}
+				if($payment_success=="success"){
+					$details['paymentMethod'] = 'stripe'; 
+					$details['userId'] = $this->input->post('userId');
+					$details['country'] = $this->input->post('country'); 
+					$details['state'] = $this->input->post('state'); 
+					$details['city'] = $this->input->post('city'); 
+					$details['address'] = $this->input->post('address'); 
+					$details['zipCode'] = $this->input->post('zipCode');
+					$details['orderId'] = $this->input->post('orderId');					
+					$details['addToCartId'] = $this->input->post('addToCartId'); 
+					$details['customer_id'] = $customer->id;
+					$details['transaction_id'] = $charge->id;
+					$details['amount'] = $this->input->post('amount');
+					$details['created'] = date('Y-m-d H:i:s');
+					$data = $this->Common_Model->register('productSaleOrder',$details);
+					if($data){
+						$notification['orderId'] = $this->input->post('orderId');
+						$notification['saleOrderId'] = $this->db->insert_id();
+						$notification['userId'] = $this->input->post('userId');
+						$notification['created'] = date('Y-m-d H:i:s');
+						$this->Common_Model->register('productOrderNotification',$notification);
+						$addToCartUpdate['paymentStatus'] = '1';
+						$addToCartUpdate['productSaleStatus'] = '1';
+						$update = $this->Common_Model->update('addToCart',$addToCartUpdate,'userId', $this->input->post('userId'));
+						$message['success'] = '1';
+						$message['paymentMethod'] = 'Stripe';
+						$message['message'] = 'Now, You have done payment via Stripe';
+					}
+				}
+			}
+			elseif($this->input->post('paymentMethod') == 'paypal'){
+				require_once dirname(dirname(dirname(__FILE__))).'/libraries/lib/Braintree.php';
+				Braintree_Configuration::environment('sandbox');
+				Braintree_Configuration::merchantId('wgkgwm8y6bnb7qvv');
+				Braintree_Configuration::publicKey('py3ng8n55bmbzmvr');
+				Braintree_Configuration::privateKey('a7dfcdba9251446c317af081ce90f8cd');
+				$result = Braintree_Transaction::sale([
+				  'amount' => $this->input->post('amount'),
+				  'paymentMethodNonce' => $this->input->post('token'),
+				  'options' => [
+					'submitForSettlement' => True
+				  ]
+				]);
+				if($result->success === true){
+					$details['paymentMethod'] = 'paypal'; 
+					$details['userId'] = $this->input->post('userId');
+					$details['country'] = $this->input->post('country'); 
+					$details['state'] = $this->input->post('state'); 
+					$details['city'] = $this->input->post('city'); 
+					$details['address'] = $this->input->post('address'); 
+					$details['zipCode'] = $this->input->post('zipCode');
+					$details['orderId'] = $this->input->post('orderId');					
+					$details['addToCartId'] = $this->input->post('addToCartId'); 
+					$details['transaction_id'] = $result->transaction->id;;
+					$details['amount'] = $this->input->post('amount');
+					$details['created'] = date('Y-m-d H:i:s');
+					$data = $this->Common_Model->register('productSaleOrder',$details);
+					if($data){
+						$notification['orderId'] = $this->input->post('orderId');
+						$notification['saleOrderId'] = $this->db->insert_id();
+						$notification['userId'] = $this->input->post('userId');
+						$notification['created'] = date('Y-m-d H:i:s');
+						$this->Common_Model->register('productOrderNotification',$notification);
+						$addToCartUpdate['paymentStatus'] = '1';
+						$addToCartUpdate['productSaleStatus'] = '1';
+						$update = $this->Common_Model->update('addToCart',$addToCartUpdate,'userId', $this->input->post('userId'));
+						$message['success'] = '1';
+						$message['paymentMethod'] = 'Paypal';
+						$message['message'] = 'Now, You have done payment via Paypal';
+					}
+				}
+				else{
+					$message['success'] = '0';
+					$message['message'] = 'some errpr';
+				}
+			}
+		}
+		else{
+			$message = array('success'=>'0','message'=>'Please Enter Parameters.');
+		}
+		echo json_encode($message);
+	}
+	
+	
+	public function userServicesPaymentAcceptance(){ 
+		if($this->input->post()){
+			if($this->input->post('paymentMethod') == 'cash'){
+				$details['paymentMethod'] = 'cash'; 
+				$details['userId'] = $this->input->post('userId'); 
+				$details['bokingServiceId'] = $this->input->post('bokingServiceId'); 
+				$data = $this->Common_Model->register('serviceTransactions',$details);
+				if($data){
+					$insert_id = $this->db->insert_id();
+					$details1['serviceTransactionsId'] =$insert_id;
+					$details1['user_id'] =$this->input->post('userId');
+					$details1['subSubService_id'] =$this->input->post('subSubService_id');
+					$details1['barber_id'] = $this->input->post('barber_id');
+					$details1['apointmentDate'] = $this->input->post('apointmentDate');
+					$details1['timeslot'] = $this->input->post('timeslot');
+					$details1['status'] = '1';
+					$details1['paymentStatus'] = '2';
+					$insert = $this->db->insert('userBookingServices',$details1);
+					$message['success'] = '1';
+					$message['paymentMethod'] = 'Cash';
+					$message['message'] = 'Now, You have done payment via Cash';
+				}
+			}
+			elseif($this->input->post('paymentMethod') == 'stripe'){
+				$userId = $this->input->post('userId');
+				$price = ($this->input->post('amount')*100); // converted into pence
+				$get_price = $price;
+				require_once dirname(dirname(dirname(__FILE__))).'/libraries/stripe/init.php';
+				\stripe\Stripe::setApiKey("sk_test_0EYrvOd0DV1zUH1VFknGBYdd"); //Replace with your Secret Key
+				try{
+				$payment_success="success";
+				$token = $this->input->post('token');
+				$customer = \stripe\Customer::create(array(
+					"source" => $token,
+					"description" => $userId)
+				); 
+				$charge=\stripe\Charge::create(array(
+					"amount" => $get_price, // amount in pence, again
+					"currency" => "USD",
+					"customer" => $customer->id)
+				);
+
+				} catch (\stripe\Error\ApiConnection $e) {
+				$payment_success = $e->getMessage();
+				} catch (\stripe\Error\InvalidRequest $e) {
+				echo "Network problem, perhaps try again";
+				} catch (\stripe\Error\Api $e) {
+				echo "there is an error in your card validity try in few minutes";
+				} catch (\stripe\Error\Card $e) {
+				echo "servers are down kindly try again in few minutes";
+				}
+				if($payment_success=="success"){
+					$details['paymentMethod'] = 'stripe'; 
+					$details['userId'] = $this->input->post('userId');
+					$details['bokingServiceId'] = $this->input->post('bokingServiceId'); 
+					$details['customer_id'] = $customer->id;
+					$details['transaction_id'] = $charge->id;
+					$details['amount'] = $this->input->post('amount');
+					$details['created'] = date('Y-m-d H:i:s');
+					$data = $this->Common_Model->register('serviceTransactions',$details);
+					if($data){
+						$insert_id = $this->db->insert_id();
+						$details2['serviceTransactionsId'] =$insert_id;
+						$details2['user_id'] =$this->input->post('userId');
+						$details2['paymentStatus'] = '1';
+						$details2['subSubService_id'] =$this->input->post('subSubService_id');
+						$details2['barber_id'] = $this->input->post('barber_id');
+						$details2['apointmentDate'] = $this->input->post('apointmentDate');
+						$details2['timeslot'] = $this->input->post('timeslot');
+						$details2['status'] = '1';
+						$insert = $this->db->insert('userBookingServices',$details2);
+						$message['success'] = '1';
+						$message['paymentMethod'] = 'Stripe';
+						$message['message'] = 'Now, You have done payment via Stripe';
+					}
+				}
+			}
+			elseif($this->input->post('paymentMethod') == 'paypal'){
+				require_once dirname(dirname(dirname(__FILE__))).'/libraries/lib/Braintree.php';
+				Braintree_Configuration::environment('sandbox');
+				Braintree_Configuration::merchantId('wgkgwm8y6bnb7qvv');
+				Braintree_Configuration::publicKey('py3ng8n55bmbzmvr');
+				Braintree_Configuration::privateKey('a7dfcdba9251446c317af081ce90f8cd');
+				$result = Braintree_Transaction::sale([
+				  'amount' => $this->input->post('amount'),
+				  'paymentMethodNonce' => $this->input->post('token'),
+				  'options' => [
+					'submitForSettlement' => True
+				  ]
+				]);
+				if($result->success === true){
+					$details['paymentMethod'] = 'paypal'; 
+					$details['userId'] = $this->input->post('userId');
+					$details['bokingServiceId'] = $this->input->post('bokingServiceId'); 
+					$details['transaction_id'] = $result->transaction->id;;
+					$details['amount'] = $this->input->post('amount');
+					$details['created'] = date('Y-m-d H:i:s');
+					$data = $this->Common_Model->register('serviceTransactions',$details);
+					if($data){
+						$insert_id = $this->db->insert_id();
+						$details2['serviceTransactionsId'] =$insert_id;
+						$details2['user_id'] =$this->input->post('userId');
+						$details2['paymentStatus'] = '1';
+						$details2['subSubService_id'] =$this->input->post('subSubService_id');
+						$details2['barber_id'] = $this->input->post('barber_id');
+						$details2['apointmentDate'] = $this->input->post('apointmentDate');
+						$details2['timeslot'] = $this->input->post('timeslot');
+						$details2['status'] = '1';
+						$insert = $this->db->insert('userBookingServices',$details2);
+						$message['success'] = '1';
+						$message['paymentMethod'] = 'Stripe';
+						$message['message'] = 'Now, You have done payment via Stripe';
+					}
+					
+				}
+				else{
+					$message['success'] = '0';
+					$message['message'] = 'some errpr';
+				}
+			}
+		}
+		else{
+			$message = array('success'=>'0','message'=>'Please Enter Parameters.');
+		}
+		echo json_encode($message);
+	}
+	
+	
+	
+	
+	/*public function userServicesPaymentAcceptance(){
+		if($this->input->post()){
+			if($this->input->post('paymentMethod') == 'cash'){
+				$details['paymentMethod'] = 'cash'; 
+				$details['userId'] = $this->input->post('userId'); 
+				$details['bokingServiceId'] = $this->input->post('bokingServiceId'); 
+				$data = $this->Common_Model->register('serviceTransactions',$details);
+				if($data){
+					$notification['paymentStatus'] = '2';
+					$update = $this->Common_Model->update('userBookingServices',$notification,'id', $this->input->post('bokingServiceId'));
+					if($update){
+						$details1['user_id'] =$this->input->post('userId');
+						$details1['subSubService_id'] =$this->input->post('subSubService_id');
+						$details1['barber_id'] = $this->input->post('barber_id');
+						$details1['apointmentDate'] = $this->input->post('apointmentDate');
+						$details1['timeslot'] = $this->input->post('timeslot');
+						$details1['status'] = '1';
+						$insert = $this->db->insert('userBookingServices',$details1);
+						$message['success'] = '1';
+						$message['paymentMethod'] = 'Cash';
+						$message['message'] = 'Now, You have done payment via Cash';
+					}
+				}
+			}
+			elseif($this->input->post('paymentMethod') == 'stripe'){
+				$userId = $this->input->post('userId');
+				$price = ($this->input->post('amount')*100); // converted into pence
+				$get_price = $price;
+				require_once dirname(dirname(dirname(__FILE__))).'/libraries/stripe/init.php';
+				\stripe\Stripe::setApiKey("sk_test_0EYrvOd0DV1zUH1VFknGBYdd"); //Replace with your Secret Key
+				try{
+				$payment_success="success";
+				$token = $this->input->post('token');
+				$customer = \stripe\Customer::create(array(
+					"source" => $token,
+					"description" => $userId)
+				); 
+				$charge=\stripe\Charge::create(array(
+					"amount" => $get_price, // amount in pence, again
+					"currency" => "USD",
+					"customer" => $customer->id)
+				);
+
+				} catch (\stripe\Error\ApiConnection $e) {
+				$payment_success = $e->getMessage();
+				} catch (\stripe\Error\InvalidRequest $e) {
+				echo "Network problem, perhaps try again";
+				} catch (\stripe\Error\Api $e) {
+				echo "there is an error in your card validity try in few minutes";
+				} catch (\stripe\Error\Card $e) {
+				echo "servers are down kindly try again in few minutes";
+				}
+				if($payment_success=="success"){
+					$details['paymentMethod'] = 'stripe'; 
+					$details['userId'] = $this->input->post('userId');
+					$details['bokingServiceId'] = $this->input->post('bokingServiceId'); 
+					$details['customer_id'] = $customer->id;
+					$details['transaction_id'] = $charge->id;
+					$details['amount'] = $this->input->post('amount');
+					$details['created'] = date('Y-m-d H:i:s');
+					$data = $this->Common_Model->register('serviceTransactions',$details);
+					if($data){
+						$notification['paymentStatus'] = '1';
+						$update = $this->Common_Model->update('userBookingServices',$notification,'id', $this->input->post('bokingServiceId'));
+						if($update){
+							$details2['user_id'] =$this->input->post('userId');
+							$details2['subSubService_id'] =$this->input->post('subSubService_id');
+							$details2['barber_id'] = $this->input->post('barber_id');
+							$details2['apointmentDate'] = $this->input->post('apointmentDate');
+							$details2['timeslot'] = $this->input->post('timeslot');
+							$details2['status'] = '1';
+							$insert = $this->db->insert('userBookingServices',$details2);
+							$message['success'] = '1';
+							$message['paymentMethod'] = 'Stripe';
+							$message['message'] = 'Now, You have done payment via Stripe';
+						}
+					}
+				}
+			}
+			elseif($this->input->post('paymentMethod') == 'paypal'){
+				require_once dirname(dirname(dirname(__FILE__))).'/libraries/lib/Braintree.php';
+				Braintree_Configuration::environment('sandbox');
+				Braintree_Configuration::merchantId('wgkgwm8y6bnb7qvv');
+				Braintree_Configuration::publicKey('py3ng8n55bmbzmvr');
+				Braintree_Configuration::privateKey('a7dfcdba9251446c317af081ce90f8cd');
+				$result = Braintree_Transaction::sale([
+				  'amount' => $this->input->post('amount'),
+				  'paymentMethodNonce' => $this->input->post('token'),
+				  'options' => [
+					'submitForSettlement' => True
+				  ]
+				]);
+				if($result->success === true){
+					$details['paymentMethod'] = 'paypal'; 
+					$details['userId'] = $this->input->post('userId');
+					$details['bokingServiceId'] = $this->input->post('bokingServiceId'); 
+					$details['transaction_id'] = $result->transaction->id;;
+					$details['amount'] = $this->input->post('amount');
+					$details['created'] = date('Y-m-d H:i:s');
+					$data = $this->Common_Model->register('serviceTransactions',$details);
+					if($data){
+						$notification['paymentStatus'] = '1';
+						$update = $this->Common_Model->update('userBookingServices',$notification,'id', $this->input->post('bokingServiceId'));
+						if($update){
+							$details2['user_id'] =$this->input->post('userId');
+							$details2['subSubService_id'] =$this->input->post('subSubService_id');
+							$details2['barber_id'] = $this->input->post('barber_id');
+							$details2['apointmentDate'] = $this->input->post('apointmentDate');
+							$details2['timeslot'] = $this->input->post('timeslot');
+							$details2['status'] = '1';
+							$insert = $this->db->insert('userBookingServices',$details2);
+							$message['success'] = '1';
+							$message['paymentMethod'] = 'Stripe';
+							$message['message'] = 'Now, You have done payment via Stripe';
+						}
+					}
+					
+				}
+				else{
+					$message['success'] = '0';
+					$message['message'] = 'some errpr';
+				}
+			}
+		}
+		else{
+			$message = array('success'=>'0','message'=>'Please Enter Parameters.');
+		}
+		echo json_encode($message);
+	}*/
+	
+	public function userProductSaleOrderHistory(){
+		$saleOrderDetails = $this->db->get_where('productSaleOrder',array('userId' => $this->input->post('userId')))->result_array();
+		if(!empty($saleOrderDetails)){
+			$message['success'] = '1';
+			$message['message'] = 'details found successfully';
+			foreach($saleOrderDetails as $orderDetails){
+				$cartId[] = $orderDetails['addToCartId'];
+			}
+			$cartOrderId = implode(',',$cartId);
+			$finalCartId = explode(',',$cartOrderId);
+			foreach($finalCartId as $finalId){
+				$cartDetails = $this->Common_Model->getCartDetailsByUser($finalId);
+				$cartDetails['totalPrice'] = $cartDetails['price'] * $cartDetails['quantity'];
+				$checkDeliveryStatus = $this->Common_Model->checkDeliveryStatus($finalId);			
+				$cartDetails['deliveryStatus'] = $checkDeliveryStatus['deliveryStatus'];
+				$cartDetails['orderId'] = $checkDeliveryStatus['orderId'];
+				$cartDetails['created'] = $checkDeliveryStatus['created'];
+				$message['details'][] = $cartDetails;
+			}
+		}
+		else{
+			$message['success'] = '0';
+			$message['details'] = 'no details found';
+		}
+		echo json_encode($message);
+	}
+	
+	public function getBarberBokkingServiceDetails(){
+		$getTimeSlotTime = $this->db->get_where('slot_time',array('id'=>1))->row_array();
+		if($this->input->post('currentTime') <= $getTimeSlotTime['regularSecondShiftEndTime']){
+			$joinQue = $this->db->get_where('joinQueBarber')->result_array();
+			if(!empty($joinQue)){
+				$message['success'] = '1';
+				$message['message'] = 'details found successfully';
+				foreach($joinQue as $joinQues){
+					$ids[] = $joinQues['barberId'];
+				}
+				$finalIds = implode(',',$ids);
+				$barberDeatils = $this->Common_Model->getBarberDetails1($finalIds);
+				foreach($barberDeatils as $barberDetail){
+					$serviceDetails = $this->Common_Model->getServiceDetails($barberDetail['id'],$this->input->post('apointmentDate'));
+					if(!empty($serviceDetails)){
+						//$subSubServiceDetails = $this->Common_Model->getSubCategoryDetails($serviceDetails['subSubService_id']);
+						// foreach($serviceDetails as $subSubServiceDetail){
+							// $subSubServiceDetails = $this->Common_Model->getSubCategoryDetails($subSubServiceDetail['subSubService_id']);
+							// foreach($subSubServiceDetails as $insData){
+								// $insTitle[] = $insData['title'];
+							// }
+							// $subSubServiceDetail['serviceTitle'] = implode(',',$insTitle);
+							// unset($insTitle);
+							$barberDetail['bookingDetails'] = $serviceDetails;
+						//}
+						
+					}
+					else{
+						$barberDetail['bookingDetails'] = [];
+					}
+					$message['details'][] = $barberDetail;
+				}
+				//die;
+			}
+			else{
+				$message['success'] = '0';
+				$message['message'] = 'no details found';
+			}
+		}
+		else{
+			$message['success'] = '0';
+			$message['message'] = 'no details found';
+		}
+		echo json_encode($message);
+	}
+	
+	public function joinQueBookingService(){
+		$data['user_id'] = $this->input->post('userId');
+		$data['apointmentDate'] = $this->input->post('apointmentDate');
+		$data['barber_id'] = $this->input->post('barberId');
+		$data['status'] = '1';
+		$details = $this->Common_Model->register('userBookingServices',$data);
+		if($details){
+			$message = array('success' =>'1','message'=>'service booking successfully');
+		}
+		else{
+			$message = array('success' =>'0','message'=>'no details found');
+		}
+		echo json_encode($message);
+	}
+	
+	public function paymentStatus(){
+		$details = $this->db->get_where('PaymentSetting')->result_array();
+		if(!empty($details)){
+			$message['success'] = '1';
+			$message['message'] = 'details found successfully';
+			foreach($details as $data){
+				$datas['name'] = $data['title'];
+				$datas['status'] = $data['status'];
+				$message['details'][] = $datas;
+			}
+		}
+		else{
+			$message['success'] = '0';
+			$message['message'] = 'no details found';
+		}
+		echo json_encode($message);
+	}
+	
+	
+	
+	
+	
+	
+
+	
+	
+	
+	
+	
+	
 	
 }
